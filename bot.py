@@ -11,20 +11,18 @@ DEFAULT_START_IMAGE = os.getenv("DEFAULT_START_IMAGE")  # permanent fallback ima
 
 bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
 
-# Storage (in memory, resets after restart)
+# Storage (in memory, reset every restart)
 start_photo_id = None   # temporary image
 force_channel = None
 shared_chats = {}  # alias → chat_id
 
 
-# -------------------------
-# Helpers
-# -------------------------
+# --- Helpers ---
 def is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
 
+
 def check_channel(user_id: int) -> bool:
-    """Check if user is in force-join channel (if set)."""
     global force_channel
     if force_channel and force_channel.lower() != "none":
         try:
@@ -35,51 +33,48 @@ def check_channel(user_id: int) -> bool:
             return False
     return True
 
-def send_to_shared_chats(message, extra_text=None, reply_markup=None):
-    """Send/copy message to all saved chats."""
+
+def send_to_shared_chats(func, *args, **kwargs):
+    """Send message to all saved chats using provided send function (preserves buttons)."""
     for alias, cid in shared_chats.items():
         try:
-            if message.content_type == "text":
-                bot.send_message(
-                    cid,
-                    (message.text + ("\n\n" + extra_text if extra_text else "")),
-                    reply_markup=reply_markup,
-                    disable_web_page_preview=True
-                )
-            elif message.content_type == "photo":
-                bot.send_photo(
-                    cid,
-                    message.photo[-1].file_id,
-                    caption=(message.caption or "") + (("\n\n" + extra_text) if extra_text else ""),
-                    reply_markup=reply_markup
-                )
-            elif message.content_type == "video":
-                bot.send_video(
-                    cid,
-                    message.video.file_id,
-                    caption=(message.caption or "") + (("\n\n" + extra_text) if extra_text else ""),
-                    reply_markup=reply_markup
-                )
-            else:
-                bot.copy_message(cid, message.chat.id, message.message_id)
+            func(cid, *args, **kwargs)
         except Exception as e:
             print(f"❌ Failed to send to {alias} ({cid}): {e}")
 
+
 def send_to_chat(alias, message):
-    """Send (copy) a reply message to one alias chat."""
+    """Send a reply message to one alias chat with inline buttons if present."""
     if alias not in shared_chats:
         return False, f"⚠️ Alias `{alias}` not found."
     cid = shared_chats[alias]
+
     try:
-        bot.copy_message(cid, message.chat.id, message.message_id)
+        markup = message.reply_markup  # keep inline buttons if any
+
+        if message.content_type == "text":
+            bot.send_message(cid, message.text,
+                             reply_markup=markup,
+                             disable_web_page_preview=True)
+
+        elif message.content_type == "photo":
+            bot.send_photo(cid, message.photo[-1].file_id,
+                           caption=message.caption or "",
+                           reply_markup=markup)
+
+        elif message.content_type == "video":
+            bot.send_video(cid, message.video.file_id,
+                           caption=message.caption or "",
+                           reply_markup=markup)
+
+        else:
+            # fallback: copy, but buttons may not come
+            bot.copy_message(cid, message.chat.id, message.message_id)
+
         return True, f"✅ Message sent to `{alias}`."
     except Exception as e:
         return False, f"❌ Failed to send to `{alias}`: {e}"
 
-
-# -------------------------
-# Commands
-# -------------------------
 
 # --- START ---
 @bot.message_handler(commands=['start'])
@@ -111,17 +106,16 @@ def help_cmd(message):
         "/help → Show this help\n\n"
         "👥 *Owner only:*\n"
         "/setimage → Reply to a photo to set as start image (temporary)\n"
-        "/resetimage → Reset start image back to default\n"
         "/setchannel → Set force join channel (@channel or none)\n"
-        "/addchat → Add alias + chat_id to auto-share list\n"
+        "/addchat → Add alias+chat_id to auto-share list\n"
         "/listchat → Show all saved chats\n"
-        "/removechat → Remove chat by alias\n"
-        "/sendto <alias> (reply) → Send message to one alias\n\n"
+        "/removechat → Remove chat from auto-share list\n"
+        "/sendto → Reply to a message and send to alias (buttons preserved)\n\n"
         "📌 *Content Commands:*\n"
-        "/texturl Text | URL → Send text with clickable link\n"
-        "/settextbutton Text|URL, Text2|URL2 | Caption → Text + buttons\n"
-        "/setphotobutton ... → Reply to photo + add buttons\n"
-        "/setvideobutton ... → Reply to video + add buttons"
+        "/texturl Text | URL → Send text with clickable link (no preview)\n"
+        "/settextbutton Text|URL, Text2|URL2 | Caption → Send text with inline buttons\n"
+        "/setphotobutton ... → Reply to photo → send photo with buttons + caption\n"
+        "/setvideobutton ... → Reply to video → send video with buttons + caption"
     )
     bot.send_message(message.chat.id, text, disable_web_page_preview=True)
 
@@ -135,15 +129,7 @@ def set_image(message):
     if not message.reply_to_message or not message.reply_to_message.photo:
         return bot.reply_to(message, "❌ Reply to a photo with /setimage.")
     start_photo_id = message.reply_to_message.photo[-1].file_id
-    bot.reply_to(message, "✅ Start image updated (temporary, will reset after restart).")
-
-@bot.message_handler(commands=['resetimage'])
-def reset_image(message):
-    global start_photo_id
-    if not is_owner(message.from_user.id):
-        return bot.reply_to(message, "❌ Only owner can use this.")
-    start_photo_id = None
-    bot.reply_to(message, "✅ Start image reset to default.")
+    bot.reply_to(message, "✅ Start image updated (temporary, resets on restart).")
 
 
 # --- SET CHANNEL ---
@@ -164,6 +150,7 @@ def set_channel(message):
 def add_chat(message):
     if not is_owner(message.from_user.id):
         return bot.reply_to(message, "❌ Only owner can use this.")
+
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         return bot.reply_to(message, "Usage: /addchat <alias> <chat_id>")
@@ -177,6 +164,7 @@ def add_chat(message):
     shared_chats[alias] = chat_id
     bot.reply_to(message, f"✅ Chat added:\nAlias: `{alias}`\nID: `{chat_id}`", parse_mode="Markdown")
 
+
 @bot.message_handler(commands=['listchat'])
 def list_chat(message):
     if not is_owner(message.from_user.id):
@@ -185,6 +173,7 @@ def list_chat(message):
         return bot.reply_to(message, "ℹ️ No chats saved yet.")
     lines = [f"- `{alias}` → `{cid}`" for alias, cid in shared_chats.items()]
     bot.reply_to(message, "📋 Saved Chats:\n" + "\n".join(lines), parse_mode="Markdown")
+
 
 @bot.message_handler(commands=['removechat'])
 def remove_chat(message):
@@ -201,7 +190,7 @@ def remove_chat(message):
         bot.reply_to(message, f"⚠️ Alias `{alias}` not found.")
 
 
-# --- SEND TO ONE ALIAS ---
+# --- SEND TO ONE ALIAS (with buttons preserved) ---
 @bot.message_handler(commands=['sendto'])
 def sendto(message):
     if not is_owner(message.from_user.id):
@@ -228,8 +217,8 @@ def texturl(message):
         return bot.reply_to(message, "Usage: /texturl Text | URL")
     text, url = [x.strip() for x in args[1].split("|", 1)]
     msg_text = f"[{text}]({url})"
-    sent = bot.send_message(message.chat.id, msg_text, disable_web_page_preview=True)
-    send_to_shared_chats(sent)
+    bot.send_message(message.chat.id, msg_text, disable_web_page_preview=True)
+    send_to_shared_chats(bot.send_message, msg_text, disable_web_page_preview=True)
 
 
 # --- SET TEXT WITH BUTTONS ---
@@ -237,7 +226,7 @@ def texturl(message):
 def set_text_button(message):
     if not check_channel(message.from_user.id):
         kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{force_channel.lstrip('@')}"))
+        kb.add(types.InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{force_channel.lstrip('@']}"))
         return bot.send_message(message.chat.id, "⚠️ Please join the channel first.", reply_markup=kb)
     args = message.text.split(" ", 1)
     if len(args) < 2 or "|" not in args[1]:
@@ -247,14 +236,13 @@ def set_text_button(message):
         buttons_part, caption = args[1].rsplit(" | ", 1)
     else:
         buttons_part = args[1]
-        caption = ""
     kb = types.InlineKeyboardMarkup()
     for part in [p.strip() for p in buttons_part.split(",") if p.strip()]:
         if "|" in part:
             t, u = [x.strip() for x in part.split("|", 1)]
             kb.add(types.InlineKeyboardButton(t, url=u))
-    sent = bot.send_message(message.chat.id, caption or "Here are your buttons:", reply_markup=kb, disable_web_page_preview=True)
-    send_to_shared_chats(sent, reply_markup=kb)
+    bot.send_message(message.chat.id, caption or "Here are your buttons:", reply_markup=kb, disable_web_page_preview=True)
+    send_to_shared_chats(bot.send_message, caption or "Here are your buttons:", reply_markup=kb, disable_web_page_preview=True)
 
 
 # --- SET PHOTO WITH BUTTONS ---
@@ -277,8 +265,8 @@ def set_photo_button(message):
             t, u = [x.strip() for x in part.split("|", 1)]
             kb.add(types.InlineKeyboardButton(t, url=u))
     photo_id = message.reply_to_message.photo[-1].file_id
-    sent = bot.send_photo(message.chat.id, photo_id, caption=caption, reply_markup=kb)
-    send_to_shared_chats(sent, reply_markup=kb)
+    bot.send_photo(message.chat.id, photo_id, caption=caption, reply_markup=kb)
+    send_to_shared_chats(bot.send_photo, photo_id, caption=caption, reply_markup=kb)
 
 
 # --- SET VIDEO WITH BUTTONS ---
@@ -301,13 +289,11 @@ def set_video_button(message):
             t, u = [x.strip() for x in part.split("|", 1)]
             kb.add(types.InlineKeyboardButton(t, url=u))
     video_id = message.reply_to_message.video.file_id
-    sent = bot.send_video(message.chat.id, video_id, caption=caption, reply_markup=kb)
-    send_to_shared_chats(sent, reply_markup=kb)
+    bot.send_video(message.chat.id, video_id, caption=caption, reply_markup=kb)
+    send_to_shared_chats(bot.send_video, video_id, caption=caption, reply_markup=kb)
 
 
-# -------------------------
-# Health check (Flask for Render)
-# -------------------------
+# --- Health check (Flask for Render) ---
 app = Flask(__name__)
 
 @app.route('/health')
