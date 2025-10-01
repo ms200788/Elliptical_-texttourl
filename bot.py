@@ -7,11 +7,12 @@ from telebot import types
 # --- Config from Environment ---
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+DEFAULT_START_IMAGE = os.getenv("DEFAULT_START_IMAGE")  # permanent fallback image_id
 
 bot = telebot.TeleBot(TOKEN, parse_mode="Markdown")
 
-# Storage (in memory, can be swapped with DB later)
-start_photo_id = None
+# Storage (in memory, resets after restart)
+start_photo_id = None   # temporary image
 force_channel = None
 shared_chats = {}  # alias → chat_id
 
@@ -68,7 +69,6 @@ def send_to_chat(alias, message):
     """Send (copy) a reply message to one alias chat."""
     if alias not in shared_chats:
         return False, f"⚠️ Alias `{alias}` not found."
-
     cid = shared_chats[alias]
     try:
         bot.copy_message(cid, message.chat.id, message.message_id)
@@ -90,10 +90,12 @@ def start(message):
         kb.add(types.InlineKeyboardButton("📢 Join Channel", url=f"https://t.me/{force_channel.lstrip('@')}"))
         return bot.send_message(message.chat.id, "⚠️ Please join the channel first.", reply_markup=kb)
 
-    if start_photo_id:
+    # Pick image: temp if set, else default env
+    photo_id = start_photo_id or DEFAULT_START_IMAGE
+    if photo_id:
         bot.send_photo(
             message.chat.id,
-            start_photo_id,
+            photo_id,
             caption="Welcome To Our Bot.\n\nThis Bot is a private Bot."
         )
     else:
@@ -108,15 +110,16 @@ def help_cmd(message):
         "/start → Show bot is online\n"
         "/help → Show this help\n\n"
         "👥 *Owner only:*\n"
-        "/setimage → Reply to a photo to set as start image\n"
+        "/setimage → Reply to a photo to set as start image (temporary)\n"
+        "/resetimage → Reset start image back to default\n"
         "/setchannel → Set force join channel (@channel or none)\n"
         "/addchat → Add alias + chat_id to auto-share list\n"
         "/listchat → Show all saved chats\n"
         "/removechat → Remove chat by alias\n"
-        "/sendto <alias> (reply to a message) → Send message to one alias\n\n"
+        "/sendto <alias> (reply) → Send message to one alias\n\n"
         "📌 *Content Commands:*\n"
         "/texturl Text | URL → Send text with clickable link\n"
-        "/settextbutton Text|URL, Text2|URL2 | Caption → Text + inline buttons\n"
+        "/settextbutton Text|URL, Text2|URL2 | Caption → Text + buttons\n"
         "/setphotobutton ... → Reply to photo + add buttons\n"
         "/setvideobutton ... → Reply to video + add buttons"
     )
@@ -132,7 +135,15 @@ def set_image(message):
     if not message.reply_to_message or not message.reply_to_message.photo:
         return bot.reply_to(message, "❌ Reply to a photo with /setimage.")
     start_photo_id = message.reply_to_message.photo[-1].file_id
-    bot.reply_to(message, "✅ Start image updated.")
+    bot.reply_to(message, "✅ Start image updated (temporary, will reset after restart).")
+
+@bot.message_handler(commands=['resetimage'])
+def reset_image(message):
+    global start_photo_id
+    if not is_owner(message.from_user.id):
+        return bot.reply_to(message, "❌ Only owner can use this.")
+    start_photo_id = None
+    bot.reply_to(message, "✅ Start image reset to default.")
 
 
 # --- SET CHANNEL ---
