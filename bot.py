@@ -117,17 +117,18 @@ def add_chat(message):
     if not is_owner(message.from_user.id):
         return bot.reply_to(message, "❌ Only owner can use this.")
 
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        return bot.reply_to(message, "Usage: /addchat <chat_id>")
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        return bot.reply_to(message, "Usage: /addchat <alias> <chat_id>")
 
+    alias = args[1].strip()
     try:
-        chat_id = int(args[1])
-        shared_chats.add(chat_id)
-        bot.reply_to(message, f"✅ Chat `{chat_id}` added.", parse_mode="Markdown")
+        chat_id = int(args[2].strip())
     except ValueError:
-        bot.reply_to(message, "❌ Invalid chat ID. Use a numeric ID.")
+        return bot.reply_to(message, "❌ Invalid chat ID. Use a numeric ID.")
 
+    shared_chats[alias] = chat_id
+    bot.reply_to(message, f"✅ Chat added:\nAlias: `{alias}`\nID: `{chat_id}`", parse_mode="Markdown")
 
 @bot.message_handler(commands=['listchat'])
 def list_chat(message):
@@ -137,9 +138,8 @@ def list_chat(message):
     if not shared_chats:
         return bot.reply_to(message, "ℹ️ No chats saved yet.")
 
-    chats_list = "\n".join([f"- `{cid}`" for cid in shared_chats])
-    bot.reply_to(message, f"📋 Saved Chats:\n{chats_list}", parse_mode="Markdown")
-
+    lines = [f"- `{alias}` → `{cid}`" for alias, cid in shared_chats.items()]
+    bot.reply_to(message, "📋 Saved Chats:\n" + "\n".join(lines), parse_mode="Markdown")
 
 @bot.message_handler(commands=['removechat'])
 def remove_chat(message):
@@ -148,17 +148,33 @@ def remove_chat(message):
 
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        return bot.reply_to(message, "Usage: /removechat <chat_id>")
+        return bot.reply_to(message, "Usage: /removechat <alias>")
 
-    try:
-        chat_id = int(args[1])
-        if chat_id in shared_chats:
-            shared_chats.remove(chat_id)
-            bot.reply_to(message, f"🗑️ Chat `{chat_id}` removed.", parse_mode="Markdown")
-        else:
-            bot.reply_to(message, "⚠️ This chat is not in the saved list.")
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid chat ID. Use a numeric ID.")
+    alias = args[1].strip()
+    if alias in shared_chats:
+        cid = shared_chats.pop(alias)
+        bot.reply_to(message, f"🗑️ Removed alias `{alias}` (ID: `{cid}`)", parse_mode="Markdown")
+    else:
+        bot.reply_to(message, f"⚠️ Alias `{alias}` not found.")
+
+# --- SEND TO ONE ALIAS ---
+@bot.message_handler(commands=['sendto'])
+def sendto(message):
+    if not is_owner(message.from_user.id):
+        return bot.reply_to(message, "❌ Only owner can use this.")
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: reply with /sendto <alias>")
+
+    alias = args[1].strip()
+
+    if not message.reply_to_message:
+        return bot.reply_to(message, "⚠️ You must reply to a message to use /sendto.")
+
+    success, response = send_to_chat(alias, message.reply_to_message)
+    bot.reply_to(message, response, parse_mode="Markdown")
+
 
 
 # --- TEXT URL ---
