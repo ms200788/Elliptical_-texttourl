@@ -33,16 +33,38 @@ def check_channel(user_id: int) -> bool:
     return True
 
 
-def send_to_shared_chats(func, *args, **kwargs):
-    """
-    Helper: send same message to all saved chats.
-    func = bot.send_message / bot.send_photo / bot.send_video
-    """
-    for cid in shared_chats:
+
+
+# -------------------------
+# Helpers
+# -------------------------
+def is_owner(user_id: int) -> bool:
+    return user_id == OWNER_ID
+
+def send_to_shared_chats(message, extra_text=None):
+    """Send message to all saved chats."""
+    for alias, cid in shared_chats.items():
         try:
-            func(cid, *args, **kwargs)
+            if message.content_type == "text":
+                bot.send_message(cid, message.text + (("\n\n" + extra_text) if extra_text else ""))
+            else:
+                bot.copy_message(cid, message.chat.id, message.message_id)
         except Exception as e:
-            print(f"Failed to send to {cid}: {e}")
+            print(f"❌ Failed to send to {alias} ({cid}): {e}")
+
+def send_to_chat(alias, message):
+    """Send (copy) a reply message to one alias chat."""
+    if alias not in shared_chats:
+        return False, f"⚠️ Alias `{alias}` not found."
+
+    cid = shared_chats[alias]
+    try:
+        bot.copy_message(cid, message.chat.id, message.message_id)
+        return True, f"✅ Message sent to `{alias}`."
+    except Exception as e:
+        return False, f"❌ Failed to send to `{alias}`: {e}"
+
+
 
 
 # --- START ---
