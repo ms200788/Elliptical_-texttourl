@@ -47,7 +47,7 @@ def _join_channel_keyboard():
 
 
 def send_to_all(message, extra_text: str = None):
-    """Broadcast a Message object to all chats in shared_chats."""
+    """Broadcast message to all chats in shared_chats."""
     for alias, cid in shared_chats.items():
         try:
             markup = getattr(message, "reply_markup", None)
@@ -82,7 +82,7 @@ def send_to_all(message, extra_text: str = None):
 
 
 def send_to_chat(alias: str, message):
-    """Send a replied message to one alias chat while trying to preserve inline buttons."""
+    """Send replied message to one alias chat."""
     if alias not in shared_chats:
         return False, f"⚠️ Alias `{alias}` not found."
     cid = shared_chats[alias]
@@ -127,12 +127,12 @@ def cmd_help(message):
         "/help → Show this help\n\n"
         "👥 *Owner only:*\n"
         "/setimage → Reply to a photo to set as start image (temporary)\n"
-        "/resetimage → Reset start image back to default\n"
+        "/resetimage → Reset start image back to default (from DEFAULT_START_IMAGE)\n"
         "/setchannel → Set force join channel (@channel or none)\n"
         "/addchat → Add alias + chat_id to auto-share list\n"
         "/listchat → Show all saved chats\n"
         "/removechat → Remove chat by alias\n"
-        "/sendto <alias> (reply) → Send replied message to alias (buttons preserved)\n"
+        "/sendto `alias` (reply) → Send replied message to alias (buttons preserved)\n"
         "/broadcast (reply) → Send replied message to all saved chats\n\n"
         "📌 *Content Commands:*\n"
         "/texturl Text | URL → Send text with clickable link (no preview)\n"
@@ -240,6 +240,7 @@ def cmd_broadcast(message):
     bot.reply_to(message, "✅ Broadcast attempted to all saved chats.")
 
 
+# --- Text with URL (no preview) ---
 @bot.message_handler(commands=['texturl'])
 def cmd_texturl(message):
     if not check_channel(message.from_user.id):
@@ -253,6 +254,7 @@ def cmd_texturl(message):
     send_to_all(sent)
 
 
+# --- Set text with inline buttons ---
 @bot.message_handler(commands=['settextbutton'])
 def cmd_settextbutton(message):
     if not check_channel(message.from_user.id):
@@ -274,6 +276,7 @@ def cmd_settextbutton(message):
     send_to_all(sent)
 
 
+# --- Set photo with buttons ---
 @bot.message_handler(commands=['setphotobutton'])
 def cmd_setphotobutton(message):
     if not message.reply_to_message or not message.reply_to_message.photo:
@@ -296,6 +299,7 @@ def cmd_setphotobutton(message):
     send_to_all(sent)
 
 
+# --- Set video with buttons ---
 @bot.message_handler(commands=['setvideobutton'])
 def cmd_setvideobutton(message):
     if not message.reply_to_message or not message.reply_to_message.video:
@@ -323,11 +327,9 @@ def cmd_setvideobutton(message):
 # -------------------------
 app = Flask(__name__)
 
-
 @app.route('/health')
 def health():
     return "OK", 200
-
 
 def run_web():
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
