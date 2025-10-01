@@ -116,16 +116,27 @@ def set_channel(message):
 def add_chat(message):
     if not is_owner(message.from_user.id):
         return bot.reply_to(message, "❌ Only owner can use this.")
-    shared_chats.add(message.chat.id)
-    bot.reply_to(message, f"✅ Chat `{message.chat.id}` added.", parse_mode="Markdown")
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: /addchat <chat_id>")
+
+    try:
+        chat_id = int(args[1])
+        shared_chats.add(chat_id)
+        bot.reply_to(message, f"✅ Chat `{chat_id}` added.", parse_mode="Markdown")
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid chat ID. Use a numeric ID.")
 
 
 @bot.message_handler(commands=['listchat'])
 def list_chat(message):
     if not is_owner(message.from_user.id):
         return bot.reply_to(message, "❌ Only owner can use this.")
+
     if not shared_chats:
         return bot.reply_to(message, "ℹ️ No chats saved yet.")
+
     chats_list = "\n".join([f"- `{cid}`" for cid in shared_chats])
     bot.reply_to(message, f"📋 Saved Chats:\n{chats_list}", parse_mode="Markdown")
 
@@ -134,11 +145,20 @@ def list_chat(message):
 def remove_chat(message):
     if not is_owner(message.from_user.id):
         return bot.reply_to(message, "❌ Only owner can use this.")
-    if message.chat.id in shared_chats:
-        shared_chats.remove(message.chat.id)
-        bot.reply_to(message, f"🗑️ Chat `{message.chat.id}` removed.", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, "⚠️ This chat is not in the saved list.")
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: /removechat <chat_id>")
+
+    try:
+        chat_id = int(args[1])
+        if chat_id in shared_chats:
+            shared_chats.remove(chat_id)
+            bot.reply_to(message, f"🗑️ Chat `{chat_id}` removed.", parse_mode="Markdown")
+        else:
+            bot.reply_to(message, "⚠️ This chat is not in the saved list.")
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid chat ID. Use a numeric ID.")
 
 
 # --- TEXT URL ---
