@@ -137,26 +137,28 @@ def cmd_start(message):
 
 @bot.message_handler(commands=['help'])
 def cmd_help(message):
-    help_text = (
-        "📖 *Bot Commands:*\n\n"
-        "/start → Show bot is online\n"
-        "/help → Show this help\n\n"
-        "👥 *Owner only:*\n"
-        "/setimage → Reply to a photo to set as start image (temporary)\n"
-        "/resetimage → Reset start image back to default\n"
-        "/setchannel → Set force join channel (@channel or none)\n"
-        "/addchat → Add alias + chat_id to auto-share list\n"
-        "/listchat → Show all saved chats\n"
-        "/removechat → Remove chat by alias\n"
-        "/sendto <alias> (reply) → Send replied message to alias (buttons preserved)\n"
-        "/broadcast (reply) → Send replied message to all saved chats\n\n"
-        "📌 *Content Commands:*\n"
-        "/texturl Text | URL → Send text with clickable link (no preview)\n"
-        "/settextbutton Text|URL, Text2|URL2 | Caption → Send text + inline buttons\n"
-        "/setphotobutton ... → Reply to photo → send photo with buttons + caption\n"
-        "/setvideobutton ... → Reply to video → send video with buttons + caption"
+    help_text = """
+<b>🤖 Available Commands</b>
+
+/start - Start the bot  
+/help - Show this help  
+
+<b>👑 Owner only:</b>  
+/setchannel - Set force join channel  
+/setforcechannel - Enable/disable force join  
+/setmessage - Set start message  
+/setimage - Set start image (temporary until reset)  
+/broadcast - Send message to all users  
+/addchat - Add chat alias for sending  
+/sendto &lt;alias&gt; - Forward/repost replied message to saved chat  
+"""
+
+    bot.send_message(
+        message.chat.id,
+        help_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True
     )
-    bot.send_message(message.chat.id, help_text, parse_mode="Markdown", disable_web_page_preview=True)
 
 
 @bot.message_handler(commands=['setimage'])
