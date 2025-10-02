@@ -1,5 +1,6 @@
 import os
 import threading
+import re
 from flask import Flask
 import telebot
 from telebot import types
@@ -135,10 +136,10 @@ def cmd_help(message):
         "/sendto `alias` (reply) → Send replied message to alias (buttons preserved)\n"
         "/broadcast (reply) → Send replied message to all saved chats\n\n"
         "📌 *Content Commands:*\n"
-        "/texturl Text | URL → Send text with clickable link (no preview)\n"
-        "/settextbutton Text|URL, Text2|URL2 | Caption → Send text + inline buttons\n"
-        "/setphotobutton ... → Reply to photo → send photo with buttons + caption\n"
-        "/setvideobutton ... → Reply to video → send video with buttons + caption"
+        "/texturl (reply to text) → Use `{ word | url }` inside your passage to make clickable links.\n"
+        "/settextbutton Text|URL,... → Reply to a text and add buttons (original text kept)\n"
+        "/setphotobutton Text|URL,... → Reply to a photo and add buttons (original caption kept)\n"
+        "/setvideobutton Text|URL,... → Reply to a video and add buttons (original caption kept)"
     )
     bot.send_message(message.chat.id, help_text, parse_mode="Markdown", disable_web_page_preview=True)
 
@@ -240,84 +241,77 @@ def cmd_broadcast(message):
     bot.reply_to(message, "✅ Broadcast attempted to all saved chats.")
 
 
-# --- Text with URL (no preview) ---
+# --- Improved /texturl ---
 @bot.message_handler(commands=['texturl'])
 def cmd_texturl(message):
+    if not message.reply_to_message or not message.reply_to_message.text:
+        return bot.reply_to(message, "⚠️ Reply to a text message containing `{ word | url }` patterns.")
     if not check_channel(message.from_user.id):
         return bot.send_message(message.chat.id, "⚠️ Please join the channel first.", reply_markup=_join_channel_keyboard())
-    args = message.text.split(" ", 1)
-    if len(args) < 2 or "|" not in args[1]:
-        return bot.reply_to(message, "Usage: /texturl Text | URL")
-    text, url = [x.strip() for x in args[1].split("|", 1)]
-    msg_text = f"[{text}]({url})"
-    sent = bot.send_message(message.chat.id, msg_text, parse_mode="Markdown", disable_web_page_preview=True)
+
+    text = message.reply_to_message.text
+
+    def replacer(match):
+        word, url = match.group(1).strip(), match.group(2).strip()
+        return f"[{word}]({url})"
+
+    new_text = re.sub(r"\{([^|]+)\|([^}]+)\}", replacer, text)
+
+    sent = bot.send_message(message.chat.id, new_text, parse_mode="Markdown", disable_web_page_preview=True)
     send_to_all(sent)
 
 
-# --- Set text with inline buttons ---
-@bot.message_handler(commands=['settextbutton'])
-def cmd_settextbutton(message):
-    if not check_channel(message.from_user.id):
-        return bot.send_message(message.chat.id, "⚠️ Please join the channel first.", reply_markup=_join_channel_keyboard())
-    args = message.text.split(" ", 1)
-    if len(args) < 2 or "|" not in args[1]:
-        return bot.reply_to(message, "Usage: /settextbutton Text|URL, Text2|URL2 | Caption")
-    if " | " in args[1]:
-        buttons_part, caption = args[1].rsplit(" | ", 1)
-    else:
-        buttons_part = args[1]
-        caption = ""
+# --- Helper to build keyboard ---
+def _build_keyboard(buttons_str: str):
     kb = types.InlineKeyboardMarkup()
-    for part in [p.strip() for p in buttons_part.split(",") if p.strip()]:
+    for part in [p.strip() for p in buttons_str.split(",") if p.strip()]:
         if "|" in part:
             t, u = [x.strip() for x in part.split("|", 1)]
             kb.add(types.InlineKeyboardButton(t, url=u))
-    sent = bot.send_message(message.chat.id, caption or "Here are your buttons:", reply_markup=kb, disable_web_page_preview=True)
+    return kb
+
+
+# --- Add buttons but keep original caption/text ---
+@bot.message_handler(commands=['settextbutton'])
+def cmd_settextbutton(message):
+    if not message.reply_to_message or not message.reply_to_message.text:
+        return bot.reply_to(message, "❌ Reply to a text message with /settextbutton Text|URL,...")
+    args = message.text.split(" ", 1)
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: /settextbutton Text|URL, Text2|URL2")
+
+    kb = _build_keyboard(args[1])
+    text = message.reply_to_message.text
+    sent = bot.send_message(message.chat.id, text, reply_markup=kb, disable_web_page_preview=True)
     send_to_all(sent)
 
 
-# --- Set photo with buttons ---
 @bot.message_handler(commands=['setphotobutton'])
 def cmd_setphotobutton(message):
     if not message.reply_to_message or not message.reply_to_message.photo:
-        return bot.reply_to(message, "❌ Reply to a photo with /setphotobutton Text|URL, Text2|URL2 | Caption")
+        return bot.reply_to(message, "❌ Reply to a photo with /setphotobutton Text|URL,...")
     args = message.text.split(" ", 1)
-    if len(args) > 1 and " | " in args[1]:
-        buttons_part, caption = args[1].rsplit(" | ", 1)
-    elif len(args) > 1:
-        buttons_part = args[1]
-        caption = message.reply_to_message.caption or ""
-    else:
-        return bot.reply_to(message, "Usage: /setphotobutton Text|URL, Text2|URL2 | Caption")
-    kb = types.InlineKeyboardMarkup()
-    for part in [p.strip() for p in buttons_part.split(",") if p.strip()]:
-        if "|" in part:
-            t, u = [x.strip() for x in part.split("|", 1)]
-            kb.add(types.InlineKeyboardButton(t, url=u))
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: /setphotobutton Text|URL, Text2|URL2")
+
+    kb = _build_keyboard(args[1])
     photo_id = message.reply_to_message.photo[-1].file_id
+    caption = message.reply_to_message.caption or ""
     sent = bot.send_photo(message.chat.id, photo_id, caption=caption, reply_markup=kb)
     send_to_all(sent)
 
 
-# --- Set video with buttons ---
 @bot.message_handler(commands=['setvideobutton'])
 def cmd_setvideobutton(message):
     if not message.reply_to_message or not message.reply_to_message.video:
-        return bot.reply_to(message, "❌ Reply to a video with /setvideobutton Text|URL, Text2|URL2 | Caption")
+        return bot.reply_to(message, "❌ Reply to a video with /setvideobutton Text|URL,...")
     args = message.text.split(" ", 1)
-    if len(args) > 1 and " | " in args[1]:
-        buttons_part, caption = args[1].rsplit(" | ", 1)
-    elif len(args) > 1:
-        buttons_part = args[1]
-        caption = message.reply_to_message.caption or ""
-    else:
-        return bot.reply_to(message, "Usage: /setvideobutton Text|URL, Text2|URL2 | Caption")
-    kb = types.InlineKeyboardMarkup()
-    for part in [p.strip() for p in buttons_part.split(",") if p.strip()]:
-        if "|" in part:
-            t, u = [x.strip() for x in part.split("|", 1)]
-            kb.add(types.InlineKeyboardButton(t, url=u))
+    if len(args) < 2:
+        return bot.reply_to(message, "Usage: /setvideobutton Text|URL, Text2|URL2")
+
+    kb = _build_keyboard(args[1])
     video_id = message.reply_to_message.video.file_id
+    caption = message.reply_to_message.caption or ""
     sent = bot.send_video(message.chat.id, video_id, caption=caption, reply_markup=kb)
     send_to_all(sent)
 
